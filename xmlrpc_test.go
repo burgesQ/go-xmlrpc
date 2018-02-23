@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -348,4 +349,12 @@ func TestParseMixedArray(t *testing.T) {
 	if len(res.(Array)) != 4 {
 		t.Fatal("expected array with 4 entries")
 	}
+}
+
+func toXml(v interface{}, typ bool) (s string) {
+	var buf strings.Builder
+	if err := writeXML(&buf, v, typ); err != nil {
+		panic(err)
+	}
+	return buf.String()
 }
