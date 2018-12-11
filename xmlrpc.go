@@ -23,18 +23,22 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 	if nextErr != nil {
 		return xml.Name{}, nil, nextErr
 	}
+    return nextElmt(p, se)
+}
 
-	var nv interface{}
+func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, error) {
+
+    var nv interface{}
 	switch se.Name.Local {
 	case "string":
 		var s string
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		return xml.Name{}, s, nil
 	case "boolean":
 		var s string
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		s = strings.TrimSpace(s)
@@ -51,7 +55,7 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 	case "int", "i1", "i2", "i4", "i8":
 		var s string
 		var i int
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		i, e := strconv.Atoi(strings.TrimSpace(s))
@@ -59,14 +63,14 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 	case "double":
 		var s string
 		var f float64
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		f, e := strconv.ParseFloat(strings.TrimSpace(s), 64)
 		return xml.Name{}, f, e
 	case "dateTime.iso8601":
 		var s string
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		t, e := time.Parse("20060102T15:04:05", s)
@@ -77,9 +81,9 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 			}
 		}
 		return xml.Name{}, t, e
-	case "base64":
+   	case "base64":
 		var s string
-		if e := p.DecodeElement(&s, &se); e != nil {
+		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		if b, e := base64.StdEncoding.DecodeString(s); e != nil {
@@ -87,20 +91,18 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 		} else {
 			return xml.Name{}, b, nil
 		}
-	case "member":
+	case "value":
+        return nextValue(p)
+	case "member", "name", "param":
 		nextStart(p)
 		return next(p)
-
-	case "value", "name", "param":
-		nextStart(p)
-		return next(p)
-
 	case "struct":
 		st := Struct{}
 
 		var e error
 		se, e = nextStart(p)
 		for e == nil && se.Name.Local == "member" {
+
 			// name
 			se, e = nextStart(p)
 			if se.Name.Local != "name" {
@@ -110,19 +112,20 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 				break
 			}
 			var name string
-			if e = p.DecodeElement(&name, &se); e != nil {
+			if e = p.DecodeElement(&name, se); e != nil {
 				return xml.Name{}, nil, e
 			}
+
+			// value
 			se, e = nextStart(p)
 			if e != nil {
 				break
 			}
-
-			// value
-			_, value, e := next(p)
 			if se.Name.Local != "value" {
 				return xml.Name{}, nil, errors.New("invalid response")
 			}
+
+			_, value, e := nextValue(p)
 			if e != nil {
 				break
 			}
@@ -181,20 +184,45 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 
 	}
 
-	if e := p.DecodeElement(&nv, &se); e != nil {
+	if e := p.DecodeElement(&nv, se); e != nil {
 		return xml.Name{}, nil, e
 	}
 	return se.Name, nv, nil
 }
-func nextStart(p *xml.Decoder) (xml.StartElement, error) {
+
+func nextStart(p *xml.Decoder) (*xml.StartElement, error) {
 	for {
 		t, e := p.Token()
 		if e != nil {
-			return xml.StartElement{}, e
+			return &xml.StartElement{}, e
 		}
 		switch t := t.(type) {
 		case xml.StartElement:
-			return t, nil
+			return &t, nil
+		}
+	}
+}
+
+func nextValue(p *xml.Decoder) (xml.Name, interface{}, error) {
+
+    var data string
+    
+	for {
+		t, e := p.Token()
+		if e != nil {
+			return xml.Name{}, nil, e
+		}
+
+		switch t := t.(type) {
+
+		case xml.StartElement:
+            return nextElmt(p,&t)
+
+        case xml.CharData:
+            data += string(t)
+
+		case xml.EndElement:
+            return xml.Name{}, string(data), nil
 		}
 	}
 }
@@ -401,7 +429,7 @@ func Unmarshal(r io.Reader) (string, Array, error) {
 		if se.Name.Local != "methodName" {
 			return name, nil, errors.New("invalid response: missing methodName")
 		}
-		if e = p.DecodeElement(&name, &se); e != nil {
+		if e = p.DecodeElement(&name, se); e != nil {
 			return name, nil, e
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+    "bytes"
 )
 
 func createServer(path, name string, f func(args ...interface{}) (interface{}, error)) http.HandlerFunc {
@@ -28,7 +29,7 @@ func createServer(path, name string, f func(args ...interface{}) (interface{}, e
 			return
 		}
 		var s string
-		if err := p.DecodeElement(&s, &se); err != nil {
+		if err := p.DecodeElement(&s, se); err != nil {
 			http.Error(w, "wrong function name", http.StatusBadRequest)
 			return
 		}
@@ -349,6 +350,50 @@ func TestParseMixedArray(t *testing.T) {
 	if len(res.(Array)) != 4 {
 		t.Fatal("expected array with 4 entries")
 	}
+}
+
+func TestRawString(t *testing.T) {
+    payload := `
+<methodResponse>
+  <params>
+    <param> 
+      <value>
+        <array>
+          <data>
+            <value>
+              <i4>200</i4>
+            </value>
+            <value>OK</value>
+            <value>
+              <struct>
+                <member>
+                  <name>status</name>
+                  <value>OK</value>
+                </member>
+                <member>
+                  <name>contact</name>
+                  <value>&lt;sip:raf@192.168.164.128:5060&gt;;expires=60</value>
+                </member>
+              </struct>
+            </value>
+          </data>
+        </array>
+      </value> 
+    </param>
+  </params>
+</methodResponse>`
+
+    expectedResponse := `[[200 map[status:OK contact:<sip:raf@192.168.164.128:5060>;expires=60]]]`
+    
+    _, v, e := Unmarshal(bytes.NewReader([]byte(payload)))
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    v_str := fmt.Sprintf("%+v",v)
+    if strings.Compare(v_str,expectedResponse) != 0 {
+        t.Fatalf("response different from expected (%s)", v_str)
+    }
 }
 
 func toXml(v interface{}, typ bool) (s string) {
