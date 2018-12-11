@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
     "bytes"
+    "reflect"
 )
 
 func createServer(path, name string, f func(args ...interface{}) (interface{}, error)) http.HandlerFunc {
@@ -228,8 +229,9 @@ func TestParseStructArray(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(res.(Array)) != 3 {
-		t.Fatal("expected array with 3 entries")
+    res = res[0].(Array)
+	if len(res) != 3 {
+		t.Fatalf("expected array with 3 entries (%+v)", res)
 	}
 }
 
@@ -273,7 +275,8 @@ func TestParseIntArray(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(res.(Array)) != 3 {
+    res = res[0].(Array)
+	if len(res) != 3 {
 		t.Fatal("expected array with 3 entries")
 	}
 }
@@ -347,12 +350,13 @@ func TestParseMixedArray(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(res.(Array)) != 4 {
+    res = res[0].(Array)
+	if len(res) != 4 {
 		t.Fatal("expected array with 4 entries")
 	}
 }
 
-func TestRawString(t *testing.T) {
+func TestRawStringStruct(t *testing.T) {
     payload := `
 <methodResponse>
   <params>
@@ -383,17 +387,44 @@ func TestRawString(t *testing.T) {
   </params>
 </methodResponse>`
 
-    expectedResponse := `[[200 map[status:OK contact:<sip:raf@192.168.164.128:5060>;expires=60]]]`
+    expectedResponse := Array{
+        Array{
+            200, "OK",
+            Struct{
+                "status": "OK",
+                "contact": "<sip:raf@192.168.164.128:5060>;expires=60",
+            },
+        },
+    }
     
     _, v, e := Unmarshal(bytes.NewReader([]byte(payload)))
     if e != nil {
 		t.Fatalf("could not unmarshal payload: %s", e)
     }
 
-    v_str := fmt.Sprintf("%+v",v)
-    if strings.Compare(v_str,expectedResponse) != 0 {
-        t.Fatalf("response different from expected (%s)", v_str)
+    if !reflect.DeepEqual(v,expectedResponse) {
+         t.Fatalf("response different from expected (%+v)", v)
     }
+}
+
+func TestRawStringArray(t *testing.T) {
+
+    payload := `<methodResponse><params><param> 
+ <value><array><data><value>500</value><value>Call Agent does not exist</value></data></array></value> 
+</param></params></methodResponse>`
+
+    expectedResponse := Array{
+        Array{ "500", "Call Agent does not exist"},
+    }
+
+    _, v, e := Unmarshal(bytes.NewReader([]byte(payload)))
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    if !reflect.DeepEqual(v,expectedResponse) {
+        t.Fatalf("response different from expected (%+v)", v)
+    }    
 }
 
 func toXml(v interface{}, typ bool) (s string) {
