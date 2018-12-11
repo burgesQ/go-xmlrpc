@@ -141,9 +141,8 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 	case "array":
 		var ar Array
 		nextStart(p) // data
-		nextStart(p) // top of value
 		for {
-			_, value, e := next(p)
+			_, value, e := nextValue(p)
 			if e != nil {
 				break
 			}
