@@ -29,13 +29,16 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, error) {
 
     var nv interface{}
+
 	switch se.Name.Local {
+
 	case "string":
 		var s string
 		if e := p.DecodeElement(&s, se); e != nil {
 			return xml.Name{}, nil, e
 		}
 		return xml.Name{}, s, nil
+
 	case "boolean":
 		var s string
 		if e := p.DecodeElement(&s, se); e != nil {
@@ -52,6 +55,7 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 			return xml.Name{}, b, errors.New("invalid boolean value")
 		}
 		return xml.Name{}, b, nil
+
 	case "int", "i1", "i2", "i4", "i8":
 		var s string
 		var i int
@@ -60,6 +64,7 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 		}
 		i, e := strconv.Atoi(strings.TrimSpace(s))
 		return xml.Name{}, i, e
+
 	case "double":
 		var s string
 		var f float64
@@ -68,6 +73,7 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 		}
 		f, e := strconv.ParseFloat(strings.TrimSpace(s), 64)
 		return xml.Name{}, f, e
+
 	case "dateTime.iso8601":
 		var s string
 		if e := p.DecodeElement(&s, se); e != nil {
@@ -81,6 +87,7 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 			}
 		}
 		return xml.Name{}, t, e
+
    	case "base64":
 		var s string
 		if e := p.DecodeElement(&s, se); e != nil {
@@ -91,82 +98,24 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 		} else {
 			return xml.Name{}, b, nil
 		}
-	case "value":
-        return nextValue(p)
-	case "member", "name", "param":
-		nextStart(p)
-		return next(p)
-	case "struct":
-		st := Struct{}
-
-		var e error
-		se, e = nextStart(p)
-		for e == nil && se.Name.Local == "member" {
-
-			// name
-			se, e = nextStart(p)
-			if se.Name.Local != "name" {
-				return xml.Name{}, nil, errors.New("invalid response")
-			}
-			if e != nil {
-				break
-			}
-			var name string
-			if e = p.DecodeElement(&name, se); e != nil {
-				return xml.Name{}, nil, e
-			}
-
-			// value
-			se, e = nextStart(p)
-			if e != nil {
-				break
-			}
-			if se.Name.Local != "value" {
-				return xml.Name{}, nil, errors.New("invalid response")
-			}
-
-			_, value, e := nextValue(p)
-			if e != nil {
-				break
-			}
-			st[name] = value
-
-			se, e = nextStart(p)
-			if e != nil {
-				break
-			}
-		}
-		return xml.Name{}, st, e
-
-	case "array":
-		var ar Array
-		nextStart(p) // data
-		for {
-			_, value, e := nextValue(p)
-			if e != nil {
-				break
-			}
-			ar = append(ar, value)
-
-			if reflect.ValueOf(value).Kind() != reflect.Map {
-				nextStart(p)
-			}
-		}
-		return xml.Name{}, ar, nil
 
 	case "nil":
 		return xml.Name{}, nil, nil
 
+	case "value":
+        return nextValue(p)
+
+	case "struct":
+        return nextStruct(p)
+
+	case "array":
+        return nextArray(p)
+
+	case "param":
+	 	return nextValue(p)
+
 	case "params":
-		var ar Array
-		for {
-			_, value, e := next(p)
-			if e != nil {
-				break
-			}
-			ar = append(ar, value)
-		}
-		return xml.Name{}, ar, nil
+        return nextParams(p)
 
 	case "fault":
 		_, value, _ := next(p)
@@ -175,12 +124,14 @@ func nextElmt(p *xml.Decoder, se *xml.StartElement) (xml.Name, interface{}, erro
 			return xml.Name{}, value, fmt.Errorf("fault: wanted Struct, got %#v", value)
 		}
 		var f Fault
-		if s, ok := fs["faultCode"].(string); ok {
-			f.Code, _ = strconv.Atoi(s)
-		}
+        switch code := fs["faultCode"].(type) {
+        case string:
+            f.Code, _ = strconv.Atoi(code)
+        case int:
+            f.Code = code
+        }
 		f.Message, _ = fs["faultString"].(string)
 		return xml.Name{}, nil, &f
-
 	}
 
 	if e := p.DecodeElement(&nv, se); e != nil {
@@ -202,10 +153,142 @@ func nextStart(p *xml.Decoder) (*xml.StartElement, error) {
 	}
 }
 
+func nextStruct(p *xml.Decoder) (xml.Name, interface{}, error) {
+
+    const (
+        structStart = iota
+        structMember
+        structValue
+    )
+
+    var (
+        name string
+        st   Struct = make(Struct)
+    )
+    
+    state := structStart
+    for {
+        t, e := p.Token()
+		if e != nil {
+			return xml.Name{}, nil, e
+		}
+
+        switch t := t.(type) {
+		case xml.StartElement:
+            switch state {
+            case structStart:
+                if t.Name.Local != "member" {
+                    return xml.Name{}, nil, errors.New("expected member")
+                }
+                state = structMember
+            case structMember:
+                if t.Name.Local != "name" {
+                    return xml.Name{}, nil, errors.New("expected name")
+                }
+                if e := p.DecodeElement(&name, &t); e != nil {
+                    return xml.Name{}, nil, e
+                }
+                state = structValue
+            case structValue:
+                if t.Name.Local != "value" {
+                    return xml.Name{}, nil, errors.New("expected value")
+                }
+                _, v, e := nextValue(p)
+                if e != nil {
+                    return xml.Name{}, nil, e
+                }
+                st[name] = v
+                state = structStart
+            }
+        case xml.EndElement:
+            if t.Name.Local == "struct" {
+                switch state {
+                case structMember, structValue:
+                    return xml.Name{}, nil, errors.New("unexpected end of struct")
+                }
+                return xml.Name{}, st, nil
+            }
+        }
+    }
+}
+
+func nextArray(p *xml.Decoder) (xml.Name, interface{}, error) {
+
+    const (
+        arrayStart = iota
+        arrayData
+    )
+
+    var ar Array = make(Array,0)
+    
+    state := arrayStart
+    for {
+        t, e := p.Token()
+		if e != nil {
+			return xml.Name{}, nil, e
+		}
+
+        switch t := t.(type) {
+		case xml.StartElement:
+            switch state {
+            case arrayStart:
+                if t.Name.Local != "data" {
+                    return xml.Name{}, nil, errors.New("expected data")
+                }
+                state = arrayData
+            case arrayData:
+                if t.Name.Local != "value" {
+                    return xml.Name{}, nil, errors.New("expected value")
+                }
+                _, v, e := nextValue(p)
+                if e != nil {
+                    return xml.Name{}, nil, e
+                }
+                ar = append(ar, v)
+            }
+        case xml.EndElement:
+            if t.Name.Local == "data" {
+                return xml.Name{}, ar, nil
+            }
+        }
+    }
+}
+
+func nextParams(p *xml.Decoder) (xml.Name, interface{}, error) {
+
+    var ar Array = make(Array,0)
+    for {
+        t, e := p.Token()
+		if e != nil {
+			return xml.Name{}, nil, e
+		}
+
+        switch t := t.(type) {
+		case xml.StartElement:
+            if t.Name.Local != "param" {
+                return xml.Name{}, nil, errors.New("expected param")
+            }
+            _, v, e := nextValue(p)
+            if e != nil {
+                return xml.Name{}, nil, e
+            }
+            ar = append(ar, v)
+
+        case xml.EndElement:
+            if t.Name.Local == "params" {
+                return xml.Name{}, ar, nil
+            }
+        }
+    }
+}
+
 func nextValue(p *xml.Decoder) (xml.Name, interface{}, error) {
 
-    var data string
-    
+    var (
+        str   string
+        obj   interface{}
+    )
+
 	for {
 		t, e := p.Token()
 		if e != nil {
@@ -215,13 +298,23 @@ func nextValue(p *xml.Decoder) (xml.Name, interface{}, error) {
 		switch t := t.(type) {
 
 		case xml.StartElement:
-            return nextElmt(p,&t)
+            _, v, e := nextElmt(p,&t)
+            if e != nil {
+                return xml.Name{}, nil, e
+            }
+            obj = v
 
         case xml.CharData:
-            data += string(t)
+            str += string(t)
 
 		case xml.EndElement:
-            return xml.Name{}, string(data), nil
+            if obj == nil {
+                //fmt.Printf("EndElement: %s (str=%+v)\n", t.Name.Local, str)
+                return xml.Name{}, str, nil
+            } else {
+                //fmt.Printf("EndElement: %s (obj=%+v)\n", t.Name.Local, obj)
+                return xml.Name{}, obj, nil
+            }
 		}
 	}
 }

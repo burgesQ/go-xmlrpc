@@ -229,6 +229,10 @@ func TestParseStructArray(t *testing.T) {
 		t.Fatal(err)
 	}
 
+    fmt.Printf("%+v\n",res)
+    if len(res) != 1 {
+		t.Fatalf("expected array with 1 entry (%+v)", res)
+    }
     res = res[0].(Array)
 	if len(res) != 3 {
 		t.Fatalf("expected array with 3 entries (%+v)", res)
@@ -352,7 +356,7 @@ func TestParseMixedArray(t *testing.T) {
 
     res = res[0].(Array)
 	if len(res) != 4 {
-		t.Fatal("expected array with 4 entries")
+		t.Fatalf("expected array with 4 entries (%+v)", res)
 	}
 }
 
@@ -410,7 +414,10 @@ func TestRawStringStruct(t *testing.T) {
 func TestRawStringArray(t *testing.T) {
 
     payload := `<methodResponse><params><param> 
- <value><array><data><value>500</value><value>Call Agent does not exist</value></data></array></value> 
+  <value><array><data>
+    <value>500</value>
+    <value>Call Agent does not exist</value>
+  </data></array></value> 
 </param></params></methodResponse>`
 
     expectedResponse := Array{
@@ -418,6 +425,161 @@ func TestRawStringArray(t *testing.T) {
     }
 
     _, v, e := Unmarshal(bytes.NewReader([]byte(payload)))
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    if !reflect.DeepEqual(v,expectedResponse) {
+        t.Fatalf("response different from expected (%+v)", v)
+    }    
+}
+
+func TestRawStringNestedArray(t *testing.T) {
+
+    payload := `<methodResponse><params><param> 
+  <value><array><data>
+    <value>
+      <array>
+        <data>
+          <value>212.79.111.155</value>
+          <value>  <i4>5040</i4>  </value>
+          <value>  <i4>3509720</i4>  </value>
+        </data>
+      </array>
+    </value>
+    <value>
+      <array>
+        <data>
+          <value>192.168.164.1</value>
+          <value><i4>5060</i4></value>
+          <value><i4>7122760</i4></value>
+        </data>
+      </array>
+    </value>
+  </data></array></value> 
+</param></params></methodResponse>`
+
+    expectedResponse := Array{
+        Array{
+            Array{ "212.79.111.155", 5040, 3509720 },
+            Array{ "192.168.164.1", 5060, 7122760 },
+        },
+    }
+
+    _, v, e := Unmarshal(bytes.NewReader([]byte(payload)))
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    if !reflect.DeepEqual(v,expectedResponse) {
+        t.Fatalf("response different from expected (%+v)", v)
+    }    
+}
+
+func TestStruct(t *testing.T) {
+    payload := `
+    <struct>
+      <member>
+        <name>foo</name>
+        <value>bar</value>
+      </member>
+      <member>
+        <name>num</name>
+        <value><i4>12345</i4></value>
+      </member>
+      <member>
+        <name>bla</name>
+        <value>blub</value>
+      </member>
+    </struct>`
+
+    expectedResponse := Struct{
+        "foo": "bar",
+        "num": 12345,
+        "bla": "blub",
+    }
+
+    p := xml.NewDecoder(bytes.NewReader([]byte(payload)))
+    _, v, e := next(p)
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    if !reflect.DeepEqual(v,expectedResponse) {
+        t.Fatalf("response different from expected (%+v)", v)
+    }    
+}
+
+func TestArray(t *testing.T) {
+
+    payload := `
+    <array>
+      <data>
+        <value>foo</value>
+        <value><i4>1</i4></value>
+        <value>bar</value>
+        <value><i4>2</i4></value>
+        <value>bla</value>
+        <value><i4>3</i4></value>
+        <value>blub</value>
+      </data>
+    </array>`
+
+    expectedResponse := Array{
+        "foo", 1, "bar", 2, "bla", 3, "blub",
+    }
+
+    p := xml.NewDecoder(bytes.NewReader([]byte(payload)))
+    _, v, e := next(p)
+    if e != nil {
+		t.Fatalf("could not unmarshal payload: %s", e)
+    }
+
+    if !reflect.DeepEqual(v,expectedResponse) {
+        t.Fatalf("response different from expected (%+v)", v)
+    }    
+}
+
+func TestArrayOfStruct(t *testing.T) {
+
+    payload := `
+<array>
+  <data>
+    <value>foo</value>
+    <value><i4>1</i4></value>
+    <value>
+    <struct>
+      <member>
+        <name>foo</name>
+        <value>bar</value>
+      </member>
+      <member>
+        <name>num</name>
+        <value><i4>12345</i4></value>
+      </member>
+      <member>
+        <name>bla</name>
+        <value>blub</value>
+      </member>
+    </struct>
+    </value>
+    <value><i4>3</i4></value>
+    <value>blub</value>
+  </data>
+</array>`
+
+    expectedResponse := Array{
+        "foo", 1,
+        Struct{
+            "foo": "bar",
+            "num": 12345,
+            "bla": "blub",
+        },
+        3, "blub",
+    }
+
+    p := xml.NewDecoder(bytes.NewReader([]byte(payload)))
+    _, v, e := next(p)
     if e != nil {
 		t.Fatalf("could not unmarshal payload: %s", e)
     }
