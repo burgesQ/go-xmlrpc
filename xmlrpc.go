@@ -2,6 +2,7 @@ package xmlrpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
@@ -485,6 +486,7 @@ func makeRequest(name string, args ...interface{}) *bytes.Buffer {
 	}
 	return &buf
 }
+
 func call(client *http.Client, url, name string, args ...interface{}) (v Array, e error) {
 	r, e := http.DefaultClient.Post(url, "text/xml", makeRequest(name, args...))
 	if e != nil {
@@ -549,4 +551,48 @@ func (c *Client) Call(name string, args ...interface{}) (v Array, e error) {
 // Call call remote procedures function name with args
 func Call(url, name string, args ...interface{}) (v Array, e error) {
 	return call(http.DefaultClient, url, name, args...)
+}
+
+//
+// go' context.Context support
+//
+
+// CallCtx call remote procedures function name with args. The context controls
+// the entire lifetime of a request and its response: obtaining a connection,
+// sending the request, and reading the response headers and body.
+func (c *Client) CallCtx(ctx context.Context, name string, args ...interface{}) (v Array, e error) {
+	return callCtx(ctx, c.HttpClient, c.url, name, args...)
+}
+
+// CallCtx call remote procedures function name with args. The context controls
+// the entire lifetime of a request and its response: obtaining a connection,
+// sending the request, and reading the response headers and body.
+func CallCtx(ctx context.Context, url, name string, args ...interface{}) (v Array, e error) {
+	return callCtx(ctx, http.DefaultClient, url, name, args...)
+}
+
+func callCtx(ctx context.Context, client *http.Client, url, name string, args ...interface{}) (v Array, e error) {
+	req, err := http.NewRequest(http.MethodPost, url, makeRequest(name, args...))
+	if err != nil {
+		return nil, fmt.Errorf("creating xmlrpc request: %v", err)
+	}
+
+	req = req.WithContext(ctx)
+
+	r, e := client.Do(req)
+	if e != nil {
+		return nil, e
+	}
+
+	// Since we do not always read the entire body, discard the rest, which
+	// allows the http transport to reuse the connection.
+	defer io.Copy(ioutil.Discard, r.Body)
+	defer r.Body.Close()
+
+	if r.StatusCode/100 != 2 {
+		return nil, errors.New(http.StatusText(http.StatusBadRequest))
+	}
+
+	_, v, e = Unmarshal(r.Body)
+	return v, e
 }
